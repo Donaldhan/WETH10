@@ -6,6 +6,7 @@ pragma solidity 0.7.6;
 import "./interfaces/IWETH10.sol";
 import "./interfaces/IERC3156FlashBorrower.sol";
 
+//see https://github.com/ethereum/EIPs/issues/677.
 interface ITransferReceiver {
     function onTokenTransfer(address, uint, bytes calldata) external returns (bool);
 }
@@ -22,23 +23,28 @@ contract WETH10 is IWETH10 {
     string public constant name = "Wrapped Ether v10";
     string public constant symbol = "WETH10";
     uint8  public constant decimals = 18;
-
+    ///闪电贷成功回调返回值
     bytes32 public immutable CALLBACK_SUCCESS = keccak256("ERC3156FlashBorrower.onFlashLoan");
+    //授权类型hash
     bytes32 public immutable PERMIT_TYPEHASH = keccak256("Permit(address owner,address spender,uint256 value,uint256 nonce,uint256 deadline)");
+    //部署链id
     uint256 public immutable deploymentChainId;
+    //域名符
     bytes32 private immutable _DOMAIN_SEPARATOR;
 
-    /// @dev Records amount of WETH10 token owned by account.
+    /// @dev Records amount of WETH10 token owned by account. 账户余额
     mapping (address => uint256) public override balanceOf;
 
     /// @dev Records current ERC2612 nonce for account. This value must be included whenever signature is generated for {permit}.
     /// Every successful call to {permit} increases account's nonce by one. This prevents signature from being used multiple times.
+    // 账户nonce
     mapping (address => uint256) public override nonces;
 
     /// @dev Records number of WETH10 token that account (second) will be allowed to spend on behalf of another account (first) through {transferFrom}.
+    /// 授权金额
     mapping (address => mapping (address => uint256)) public override allowance;
 
-    /// @dev Current amount of flash-minted WETH10 token.
+    /// @dev Current amount of flash-minted WETH10 token. 当前已经挖取的闪电贷 WETH10 token
     uint256 public override flashMinted;
 
     constructor() {
@@ -48,7 +54,7 @@ contract WETH10 is IWETH10 {
         _DOMAIN_SEPARATOR = _calculateDomainSeparator(chainId);
     }
 
-    /// @dev Calculate the DOMAIN_SEPARATOR.
+    /// @dev Calculate the DOMAIN_SEPARATOR. 计算域名分割符
     function _calculateDomainSeparator(uint256 chainId) private view returns (bytes32) {
         return keccak256(
             abi.encode(
@@ -61,20 +67,21 @@ contract WETH10 is IWETH10 {
         );
     }
 
-    /// @dev Return the DOMAIN_SEPARATOR.
+    /// @dev Return the DOMAIN_SEPARATOR. 返回域名分割符
     function DOMAIN_SEPARATOR() external view override returns (bytes32) {
         uint256 chainId;
         assembly {chainId := chainid()}
         return chainId == deploymentChainId ? _DOMAIN_SEPARATOR : _calculateDomainSeparator(chainId);
     }
 
-    /// @dev Returns the total supply of WETH10 token as the ETH held in this contract.
+    /// @dev Returns the total supply of WETH10 token as the ETH held in this contract. 总供应量
     function totalSupply() external view override returns (uint256) {
         return address(this).balance + flashMinted;
     }
 
     /// @dev Fallback, `msg.value` of ETH sent to this contract grants caller account a matching increase in WETH10 token balance.
     /// Emits {Transfer} event to reflect WETH10 token mint of `msg.value` from `address(0)` to caller account.
+    /// 接受ETH
     receive() external payable {
         // _mintTo(msg.sender, msg.value);
         balanceOf[msg.sender] += msg.value;
@@ -83,6 +90,7 @@ contract WETH10 is IWETH10 {
 
     /// @dev `msg.value` of ETH sent to this contract grants caller account a matching increase in WETH10 token balance.
     /// Emits {Transfer} event to reflect WETH10 token mint of `msg.value` from `address(0)` to caller account.
+    /// 质押
     function deposit() external override payable {
         // _mintTo(msg.sender, msg.value);
         balanceOf[msg.sender] += msg.value;
@@ -91,6 +99,7 @@ contract WETH10 is IWETH10 {
 
     /// @dev `msg.value` of ETH sent to this contract grants `to` account a matching increase in WETH10 token balance.
     /// Emits {Transfer} event to reflect WETH10 token mint of `msg.value` from `address(0)` to `to` account.
+    /// 质押给给定账户
     function depositTo(address to) external override payable {
         // _mintTo(to, msg.value);
         balanceOf[to] += msg.value;
@@ -102,6 +111,7 @@ contract WETH10 is IWETH10 {
     /// Emits {Transfer} event.
     /// Returns boolean value indicating whether operation succeeded.
     /// For more information on {transferAndCall} format, see https://github.com/ethereum/EIPs/issues/677.
+    /// 回调版质押
     function depositToAndCall(address to, bytes calldata data) external override payable returns (bool success) {
         // _mintTo(to, msg.value);
         balanceOf[to] += msg.value;
@@ -110,18 +120,18 @@ contract WETH10 is IWETH10 {
         return ITransferReceiver(to).onTokenTransfer(msg.sender, msg.value, data);
     }
 
-    /// @dev Return the amount of WETH10 token that can be flash-lent.
+    /// @dev Return the amount of WETH10 token that can be flash-lent. 最大借贷量
     function maxFlashLoan(address token) external view override returns (uint256) {
         return token == address(this) ? type(uint112).max - flashMinted : 0; // Can't underflow
     }
 
-    /// @dev Return the fee (zero) for flash lending an amount of WETH10 token.
+    /// @dev Return the fee (zero) for flash lending an amount of WETH10 token. 目前为0
     function flashFee(address token, uint256) external view override returns (uint256) {
         require(token == address(this), "WETH: flash mint only WETH10");
         return 0;
     }
 
-    /// @dev Flash lends `value` WETH10 token to the receiver address.
+    /// @dev Flash lends `value` WETH10 token to the receiver address. 
     /// By the end of the transaction, `value` WETH10 token will be burned from the receiver.
     /// The flash-minted WETH10 token is not backed by real ETH, but can be withdrawn as such up to the ETH balance of this contract.
     /// Arbitrary data can be passed as a bytes calldata parameter.
@@ -132,22 +142,26 @@ contract WETH10 is IWETH10 {
     /// Requirements:
     ///   - `value` must be less or equal to type(uint112).max.
     ///   - The total of all flash loans in a tx must be less or equal to type(uint112).max.
+    ///闪电贷，在整个交易内完成借贷；同时借贷方receiver，必须允许当前WETH合约操作的数量，必须大于value，即借贷发生时，
+    ///借贷的金额不能超过，授权给当前WETH合约的金额
     function flashLoan(IERC3156FlashBorrower receiver, address token, uint256 value, bytes calldata data) external override returns (bool) {
-        require(token == address(this), "WETH: flash mint only WETH10");
+        require(token == address(this), "WETH: flash mint only WETH10"); //必须为当前地址
         require(value <= type(uint112).max, "WETH: individual loan limit exceeded");
         flashMinted = flashMinted + value;
         require(flashMinted <= type(uint112).max, "WETH: total loan limit exceeded");
 
-        // _mintTo(address(receiver), value);
+        // _mintTo(address(receiver), value); //借贷
         balanceOf[address(receiver)] += value;
         emit Transfer(address(0), address(receiver), value);
 
         require(
+            //触发接受者地址receiver#onFlashLoan
             receiver.onFlashLoan(msg.sender, address(this), value, 0, data) == CALLBACK_SUCCESS,
             "WETH: flash loan failed"
         );
 
         // _decreaseAllowance(address(receiver), address(this), value);
+        // 减少合约允许的授权值
         uint256 allowed = allowance[address(receiver)][address(this)];
         if (allowed != type(uint256).max) {
             require(allowed >= value, "WETH: request exceeds allowance");
@@ -156,7 +170,7 @@ contract WETH10 is IWETH10 {
             emit Approval(address(receiver), address(this), reduced);
         }
 
-        // _burnFrom(address(receiver), value);
+        // _burnFrom(address(receiver), value); //偿还
         uint256 balance = balanceOf[address(receiver)];
         require(balance >= value, "WETH: burn amount exceeds balance");
         balanceOf[address(receiver)] = balance - value;
@@ -170,6 +184,7 @@ contract WETH10 is IWETH10 {
     /// Emits {Transfer} event to reflect WETH10 token burn of `value` to `address(0)` from caller account.
     /// Requirements:
     ///   - caller account must have at least `value` balance of WETH10 token.
+    /// 提现
     function withdraw(uint256 value) external override {
         // _burnFrom(msg.sender, value);
         uint256 balance = balanceOf[msg.sender];
@@ -186,6 +201,7 @@ contract WETH10 is IWETH10 {
     /// Emits {Transfer} event to reflect WETH10 token burn of `value` to `address(0)` from caller account.
     /// Requirements:
     ///   - caller account must have at least `value` balance of WETH10 token.
+    /// 提现到给定地址
     function withdrawTo(address payable to, uint256 value) external override {
         // _burnFrom(msg.sender, value);
         uint256 balance = balanceOf[msg.sender];
@@ -205,6 +221,7 @@ contract WETH10 is IWETH10 {
     /// Requirements:
     ///   - `from` account must have at least `value` balance of WETH10 token.
     ///   - `from` account must have approved caller to spend at least `value` of WETH10 token, unless `from` and caller are the same account.
+    /// 从给定地址提现
     function withdrawFrom(address from, address payable to, uint256 value) external override {
         if (from != msg.sender) {
             // _decreaseAllowance(from, msg.sender, value);
@@ -231,6 +248,7 @@ contract WETH10 is IWETH10 {
     /// @dev Sets `value` as allowance of `spender` account over caller account's WETH10 token.
     /// Emits {Approval} event.
     /// Returns boolean value indicating whether operation succeeded.
+    /// 授权
     function approve(address spender, uint256 value) external override returns (bool) {
         // _approve(msg.sender, spender, value);
         allowance[msg.sender][spender] = value;
@@ -244,6 +262,7 @@ contract WETH10 is IWETH10 {
     /// Emits {Approval} event.
     /// Returns boolean value indicating whether operation succeeded.
     /// For more information on {approveAndCall} format, see https://github.com/ethereum/EIPs/issues/677.
+    /// 授权并Call
     function approveAndCall(address spender, uint256 value, bytes calldata data) external override returns (bool) {
         // _approve(msg.sender, spender, value);
         allowance[msg.sender][spender] = value;
@@ -261,6 +280,7 @@ contract WETH10 is IWETH10 {
     ///   - the signer cannot be `address(0)` and must be `owner` account.
     /// For more information on signature format, see https://eips.ethereum.org/EIPS/eip-2612#specification[relevant EIP section].
     /// WETH10 token implementation adapted from https://github.com/albertocuestacanada/ERC20Permit/blob/master/contracts/ERC20Permit.sol.
+    /// /eip-2612签名授权
     function permit(address owner, address spender, uint256 value, uint256 deadline, uint8 v, bytes32 r, bytes32 s) external override {
         require(block.timestamp <= deadline, "WETH: Expired permit");
 
@@ -305,7 +325,7 @@ contract WETH10 is IWETH10 {
             balanceOf[msg.sender] = balance - value;
             balanceOf[to] += value;
             emit Transfer(msg.sender, to, value);
-        } else { // Withdraw
+        } else { // Withdraw 触发提现
             uint256 balance = balanceOf[msg.sender];
             require(balance >= value, "WETH: burn amount exceeds balance");
             balanceOf[msg.sender] = balance - value;
@@ -340,7 +360,7 @@ contract WETH10 is IWETH10 {
             }
         }
 
-        // _transferFrom(from, to, value);
+        // _transferFrom(from, to, value); 
         if (to != address(0) && to != address(this)) { // Transfer
             uint256 balance = balanceOf[from];
             require(balance >= value, "WETH: transfer amount exceeds balance");
@@ -348,7 +368,7 @@ contract WETH10 is IWETH10 {
             balanceOf[from] = balance - value;
             balanceOf[to] += value;
             emit Transfer(from, to, value);
-        } else { // Withdraw
+        } else { // Withdraw 
             uint256 balance = balanceOf[from];
             require(balance >= value, "WETH: burn amount exceeds balance");
             balanceOf[from] = balance - value;
@@ -369,6 +389,7 @@ contract WETH10 is IWETH10 {
     /// Requirements:
     ///   - caller account must have at least `value` WETH10 token.
     /// For more information on {transferAndCall} format, see https://github.com/ethereum/EIPs/issues/677.
+    /// 转账，并触发回调地址的transferAndCall
     function transferAndCall(address to, uint value, bytes calldata data) external override returns (bool) {
         // _transferFrom(msg.sender, to, value);
         if (to != address(0)) { // Transfer
@@ -378,7 +399,7 @@ contract WETH10 is IWETH10 {
             balanceOf[msg.sender] = balance - value;
             balanceOf[to] += value;
             emit Transfer(msg.sender, to, value);
-        } else { // Withdraw
+        } else { // Withdraw 
             uint256 balance = balanceOf[msg.sender];
             require(balance >= value, "WETH: burn amount exceeds balance");
             balanceOf[msg.sender] = balance - value;
